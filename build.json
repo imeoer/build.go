@@ -1,0 +1,17 @@
+{
+    "/home/imeoer/PROJECT/ink.go/src/ink/*.go": [
+        "go install ink",
+        "go install bamboo",
+        "go build -o /home/imeoer/PROJECT/ink.go/main /home/imeoer/PROJECT/ink.go/src/main.go",
+        "/home/imeoer/PROJECT/ink.go/main"
+    ],
+    "/home/imeoer/PROJECT/ink.go/src/bamboo/*.go": [
+        "go install bamboo",
+        "go build -o /home/imeoer/PROJECT/ink.go/main /home/imeoer/PROJECT/ink.go/src/main.go",
+        "/home/imeoer/PROJECT/ink.go/main"
+    ],
+    "/home/imeoer/PROJECT/ink.go/src/main.go": [
+        "go build -o /home/imeoer/PROJECT/ink.go/main /home/imeoer/PROJECT/ink.go/src/main.go",
+        "/home/imeoer/PROJECT/ink.go/main"
+    ]
+}
