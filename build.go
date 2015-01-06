@@ -2,16 +2,19 @@ package main
 
 import (
     "os"
-    "os/exec"
-    "io/ioutil"
-    "encoding/json"
     "bufio"
     "fmt"
     "strings"
+    // "strconv"
+    "regexp"
+    "os/exec"
+    "io/ioutil"
+    "encoding/json"
     "path/filepath"
     "github.com/go-fsnotify/fsnotify"
 )
 
+// color define for log
 const (
     CLR_W = ""
     CLR_R = "\x1b[31;1m"
@@ -19,29 +22,30 @@ const (
     CLR_B = "\x1b[34;1m"
 )
 
-type ExecMap map[string][]string
+// variable regex
+var varRegex *regexp.Regexp
 
-// define pattern:(command array) map
-var execMap ExecMap
-
-// define command:(process pid) map
-var cmdPidMap map[string]int
-
-var watcher *fsnotify.Watcher
-
-// init some global variable
-func init() {
-    watcher, _ = fsnotify.NewWatcher()
-    cmdPidMap = make(map[string]int)
+// build define by parse config json
+type BuildMap struct {
+    Variable map[string]string `json:"variable"`
+    Task map[string][]string `json:"task"`
+    Watch map[string]string `json:"watch"`
 }
 
+var buildMap BuildMap
+
+// global watcher for file change
+var watcher *fsnotify.Watcher
+
+// print colorful log
 func log(color string, info string) {
     fmt.Printf("%s%s%s", color, info + "\n", "\x1b[0m")
 }
 
 // watch file change in specified directory
 func watch() {
-    for path, _ := range execMap {
+    for path, _ := range buildMap.Watch {
+        path = parseVariable(path)
         dirPath := filepath.Dir(path)
         filepath.Walk(dirPath, func (path string, f os.FileInfo, err error) error {
             if f.IsDir() {
@@ -60,7 +64,9 @@ func listen() {
     for {
         select {
             case event := <- watcher.Events:
-                handle(event)
+                if event.Op == fsnotify.Write {
+                    handle(event)
+                }
             case err := <- watcher.Errors:
                 log(CLR_R, err.Error())
         }
@@ -70,25 +76,61 @@ func listen() {
 func handle(event fsnotify.Event) {
     // get change file info
     fileName := event.Name
-    // if changed file path match define in execMap, run command
-    for pattern, cmdAry := range execMap {
+    // if changed file path match define in build map, run task
+    for pattern, task := range buildMap.Watch {
+        pattern = parseVariable(pattern)
         if ok, err := filepath.Match(pattern, fileName); err == nil && ok {
-            // exec command by array order
-            for _, cmd := range cmdAry {
-                run(cmd)
+            // exec task by task name
+            if taskName := extractRef(task); taskName != "" {
+                runTask(taskName)
             }
         }
     }
 }
 
-func run(command string) {
-    log(CLR_W, command)
-    // kill last process of the same name
-    if lastPid, ok := cmdPidMap[command]; ok {
-        if process, err := os.FindProcess(lastPid); err == nil {
-            process.Kill()
+func parseVariable(str string) string {
+    refAry := varRegex.FindAllString(str, -1)
+    if len(refAry) > 0 {
+        for _, ref := range refAry {
+            varName := extractRef(ref)
+            if varValue, ok := buildMap.Variable[varName]; ok {
+                str = strings.Replace(str, ref, varValue, 1)
+            }
         }
     }
+    return str
+}
+
+// extract ${} refrence
+func extractRef(str string) string {
+    refAry := varRegex.FindAllString(str, -1)
+    if len(refAry) == 1 {
+        str = refAry[0]
+        str = strings.Replace(str, "${", "", -1)
+        str = strings.Replace(str, "}", "", -1)
+        return str
+    }
+    return ""
+}
+
+func runTask(task string) {
+    if cmdAry, ok := buildMap.Task[task]; ok {
+        log(CLR_W, "RUN: " + task)
+        // exec command by array order
+        for _, cmd := range cmdAry {
+            runCMD(cmd)
+        }
+    }
+}
+
+func runCMD(command string) {
+    // run task if command is task name
+    if taskName := extractRef(command); taskName != "" {
+        runTask(taskName)
+        return
+    }
+    // parse variable in command
+    command = parseVariable(command)
     // parse command line auguments
     cmdAry := strings.Split(command, " ")
     // prepare exec command
@@ -112,20 +154,23 @@ func run(command string) {
     }()
     // exec command
     cmd.Start()
-    // cache command process pid
-    pid := cmd.Process.Pid
-    cmdPidMap[command] = pid
+}
+
+// init some global variable
+func init() {
+    watcher, _ = fsnotify.NewWatcher()
+    varRegex = regexp.MustCompile("\\${[A-Za-z0-9_-]+}")
 }
 
 func main() {
-    // parse json config file, get execMap
+    // parse json config file, get build map
     file, err := ioutil.ReadFile("./build.json")
     if err != nil {
         log(CLR_R, err.Error())
         os.Exit(1)
     }
-    if err := json.Unmarshal(file, &execMap); err != nil {
-        log(CLR_R, err.Error())
+    if err := json.Unmarshal(file, &buildMap); err != nil {
+        log(CLR_R, "Config parse: " + err.Error())
         os.Exit(1)
     }
     // use for always running
