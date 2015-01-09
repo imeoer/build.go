@@ -3,9 +3,19 @@
         "directory": "/home/imeoer/PROJECT/ink.go/"
     },
     "task": {
-        "build_ink": ["go install ink", "${build_bamboo}"],
-        "build_bamboo": ["go install bamboo", "${build_main}"],
-        "build_main": ["go build -o ${directory}main ${directory}src/main.go", "pkill main;${directory}main"]
+        "build_ink": [
+            "go install ink",
+            "${build_bamboo}"
+        ],
+        "build_bamboo": [
+            "go install bamboo",
+            "${build_main}"
+        ],
+        "build_main": [
+            "go build -o ${directory}main ${directory}src/main.go",
+            "pkill -9 main",
+            "${directory}main"
+        ]
     },
     "watch": {
         "${directory}src/ink/*.go": "${build_ink}",

@@ -5,7 +5,6 @@ import (
     "bufio"
     "fmt"
     "strings"
-    // "strconv"
     "regexp"
     "os/exec"
     "io/ioutil"
@@ -22,9 +21,6 @@ const (
     CLR_B = "\x1b[34;1m"
 )
 
-// variable regex
-var varRegex *regexp.Regexp
-
 // build define by parse config json
 type BuildMap struct {
     Variable map[string]string `json:"variable"`
@@ -33,6 +29,9 @@ type BuildMap struct {
 }
 
 var buildMap BuildMap
+
+// variable regex
+var varRegex *regexp.Regexp
 
 // global watcher for file change
 var watcher *fsnotify.Watcher
@@ -73,6 +72,7 @@ func listen() {
     }
 }
 
+// when file change, run task to handle
 func handle(event fsnotify.Event) {
     // get change file info
     fileName := event.Name
@@ -82,12 +82,13 @@ func handle(event fsnotify.Event) {
         if ok, err := filepath.Match(pattern, fileName); err == nil && ok {
             // exec task by task name
             if taskName := extractRef(task); taskName != "" {
-                runTask(taskName)
+                go runTask(taskName)
             }
         }
     }
 }
 
+// replace ${} refrence to real value
 func parseVariable(str string) string {
     refAry := varRegex.FindAllString(str, -1)
     if len(refAry) > 0 {
@@ -103,9 +104,7 @@ func parseVariable(str string) string {
 
 // extract ${} refrence
 func extractRef(str string) string {
-    refAry := varRegex.FindAllString(str, -1)
-    if len(refAry) == 1 {
-        str = refAry[0]
+    if len(str) > 3 && str[0:2] == "${" && string(str[len(str) - 1]) == "}" {
         str = strings.Replace(str, "${", "", -1)
         str = strings.Replace(str, "}", "", -1)
         return str
@@ -113,21 +112,26 @@ func extractRef(str string) string {
     return ""
 }
 
+// run task defined in build map
 func runTask(task string) {
     if cmdAry, ok := buildMap.Task[task]; ok {
         log(CLR_W, "RUN: " + task)
         // exec command by array order
         for _, cmd := range cmdAry {
-            runCMD(cmd)
+            err := runCMD(cmd)
+            if err != nil {
+                break
+            }
         }
     }
 }
 
-func runCMD(command string) {
+// run command defined in task
+func runCMD(command string) error {
     // run task if command is task name
     if taskName := extractRef(command); taskName != "" {
         runTask(taskName)
-        return
+        return nil
     }
     // parse variable in command
     command = parseVariable(command)
@@ -153,7 +157,7 @@ func runCMD(command string) {
         }
     }()
     // exec command
-    cmd.Start()
+    return cmd.Run()
 }
 
 // init some global variable
