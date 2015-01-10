@@ -1,8 +1,13 @@
 {
     "variable": {
-        "directory": "/home/imeoer/PROJECT/ink.go/"
+        "inkgo": "/home/imeoer/PROJECT/ink.go/",
+        "bamboo": "/home/imeoer/PROJECT/bamboo-web"
     },
     "task": {
+        "default": [
+            "${#build_ink}",
+            "${build_front}"
+        ],
         "build_ink": [
             "go install ink",
             "${build_bamboo}"
@@ -12,14 +17,17 @@
             "${build_main}"
         ],
         "build_main": [
-            "go build -o ${directory}main ${directory}src/main.go",
+            "go build -o ${inkgo}main ${inkgo}src/main.go",
             "pkill -9 main",
-            "${directory}main"
+            "${inkgo}main"
+        ],
+        "build_front": [
+            "gulp --cwd ${bamboo}"
         ]
     },
     "watch": {
-        "${directory}src/ink/*.go": "${build_ink}",
-        "${directory}src/bamboo/*.go": "${build_bamboo}",
-        "${directory}src/main.go": "${build_main}"
+        "${inkgo}src/ink/*.go": "${build_ink}",
+        "${inkgo}src/bamboo/*.go": "${build_bamboo}",
+        "${inkgo}src/main.go": "${build_main}"
     }
 }

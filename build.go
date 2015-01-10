@@ -2,10 +2,11 @@ package main
 
 import (
     "os"
-    "bufio"
     "fmt"
-    "strings"
+    "bufio"
     "regexp"
+    "strconv"
+    "strings"
     "os/exec"
     "io/ioutil"
     "encoding/json"
@@ -28,9 +29,10 @@ type BuildMap struct {
     Watch map[string]string `json:"watch"`
 }
 
+// storaged data form json config
 var buildMap BuildMap
 
-// variable regex
+// variable(${}) match regex
 var varRegex *regexp.Regexp
 
 // global watcher for file change
@@ -64,6 +66,7 @@ func listen() {
         select {
             case event := <- watcher.Events:
                 if event.Op == fsnotify.Write {
+                    // handle when file change
                     handle(event)
                 }
             case err := <- watcher.Errors:
@@ -82,7 +85,7 @@ func handle(event fsnotify.Event) {
         if ok, err := filepath.Match(pattern, fileName); err == nil && ok {
             // exec task by task name
             if taskName := extractRef(task); taskName != "" {
-                go runTask(taskName)
+                go runTask(taskName, false)
             }
         }
     }
@@ -113,24 +116,36 @@ func extractRef(str string) string {
 }
 
 // run task defined in build map
-func runTask(task string) {
+func runTask(task string, forceDaemon bool) {
+    // if task has # prefix, run in non-block mode
+    daemon := false
+    if string(task[0]) == "#" {
+        daemon = true
+        task = task[1:]
+    } else if forceDaemon {
+        daemon = true
+    }
     if cmdAry, ok := buildMap.Task[task]; ok {
-        log(CLR_W, "RUN: " + task)
         // exec command by array order
-        for _, cmd := range cmdAry {
-            err := runCMD(cmd)
+        for idx, cmd := range cmdAry {
+            err := runCMD(cmd, daemon)
+            log(CLR_G, "RUN: " + task + " [" + strconv.Itoa(idx) + "]")
             if err != nil {
-                break
+                log(CLR_R, err.Error())
+                continue
             }
         }
+    } else {
+        log(CLR_R, "ERR: " + task + " Not Found")
+        os.Exit(1)
     }
 }
 
 // run command defined in task
-func runCMD(command string) error {
+func runCMD(command string, daemon bool) error {
     // run task if command is task name
     if taskName := extractRef(command); taskName != "" {
-        runTask(taskName)
+        runTask(taskName, daemon)
         return nil
     }
     // parse variable in command
@@ -157,6 +172,11 @@ func runCMD(command string) error {
         }
     }()
     // exec command
+    if daemon {
+        // run in non-block mode
+        go cmd.Run()
+        return nil
+    }
     return cmd.Run()
 }
 
@@ -174,7 +194,7 @@ func main() {
         os.Exit(1)
     }
     if err := json.Unmarshal(file, &buildMap); err != nil {
-        log(CLR_R, "Config parse: " + err.Error())
+        log(CLR_R, "Config Parse: " + err.Error())
         os.Exit(1)
     }
     // use for always running
@@ -183,5 +203,11 @@ func main() {
     watch()
     // listen watching file change
     go listen()
+    // run specified task, if not specified, run default task
+    if len(os.Args) > 1 {
+        runTask(os.Args[1], false)
+    } else {
+        runTask("default", false)
+    }
     <- done
 }
