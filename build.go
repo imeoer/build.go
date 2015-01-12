@@ -129,10 +129,11 @@ func runTask(task string, forceDaemon bool) {
         // exec command by array order
         for idx, cmd := range cmdAry {
             err := runCMD(cmd, daemon)
-            log(CLR_G, "RUN: " + task + " [" + strconv.Itoa(idx) + "]")
+            taskName := task + " [" + strconv.Itoa(idx) + "]"
+            log(CLR_G, "RUN: " + taskName)
             if err != nil {
-                log(CLR_R, err.Error())
-                continue
+                log(CLR_G, "RUN TERMINATED: " + taskName)
+                break
             }
         }
     } else {
@@ -151,9 +152,9 @@ func runCMD(command string, daemon bool) error {
     // parse variable in command
     command = parseVariable(command)
     // parse command line auguments
-    cmdAry := strings.Split(command, " ")
+    // cmdAry := strings.Split(command, " ")
     // prepare exec command
-    cmd := exec.Command(cmdAry[0], cmdAry[1:]...)
+    cmd := exec.Command("/bin/sh", "-c", command)
     // start print stdout and stderr of process
     stdout, _ := cmd.StdoutPipe()
     stderr, _ := cmd.StderrPipe()

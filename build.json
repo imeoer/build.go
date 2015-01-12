@@ -6,7 +6,9 @@
     "task": {
         "default": [
             "${#build_ink}",
-            "${build_front}"
+            "${#build_front}",
+            "sudo atom ${inkgo}",
+            "sudo atom ${bamboo}"
         ],
         "build_ink": [
             "go install ink",
@@ -18,11 +20,17 @@
         ],
         "build_main": [
             "go build -o ${inkgo}main ${inkgo}src/main.go",
-            "pkill -9 main",
-            "${inkgo}main"
+            "pkill -9 main || true",
+            "${inkgo}main || true"
         ],
         "build_front": [
             "gulp --cwd ${bamboo}"
+        ],
+        "low": [
+            "xrandr --output eDP1 --mode 1360x768"
+        ],
+        "high": [
+            "xrandr --output eDP1 --mode 1920x1080"
         ]
     },
     "watch": {
