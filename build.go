@@ -9,12 +9,13 @@ import (
     "strings"
     "os/exec"
     "io/ioutil"
-    "encoding/json"
     "path/filepath"
+    "gopkg.in/yaml.v2"
+    "github.com/codegangsta/cli"
     "github.com/go-fsnotify/fsnotify"
 )
 
-// color define for log
+// Color define for log
 const (
     CLR_W = ""
     CLR_R = "\x1b[31;1m"
@@ -22,35 +23,40 @@ const (
     CLR_B = "\x1b[34;1m"
 )
 
-// build define by parse config json
+// Build define by parse config json
 type BuildMap struct {
-    Variable map[string]string `json:"variable"`
-    Task map[string][]string `json:"task"`
-    Watch map[string]string `json:"watch"`
+    Variable map[string]string
+    Task map[string][]string
+    Watch map[string]string
 }
 
-// storaged data form json config
+// Storaged data form json config
 var buildMap BuildMap
 
-// variable(${}) match regex
+// Variable(${}) match regex
 var varRegex *regexp.Regexp
 
-// global watcher for file change
+// Global watcher for file change
 var watcher *fsnotify.Watcher
 
-// print colorful log
+// Print colorful log
 func log(color string, info string) {
     fmt.Printf("%s%s%s", color, info + "\n", "\x1b[0m")
 }
 
-// watch file change in specified directory
-func watch() {
+// Watch file change in specified directory
+func startWatch() {
     for path, _ := range buildMap.Watch {
         path = parseVariable(path)
         dirPath := filepath.Dir(path)
+        _, err := os.Stat(dirPath)
+        if err != nil {
+            log(CLR_R, err.Error())
+            os.Exit(1)
+        }
         filepath.Walk(dirPath, func (path string, f os.FileInfo, err error) error {
             if f.IsDir() {
-                // defer watcher.Close()
+                // Defer watcher.Close()
                 if err := watcher.Add(path); err != nil {
                     log(CLR_R, err.Error())
                 }
@@ -58,32 +64,31 @@ func watch() {
             return nil
         })
     }
-}
-
-// listen watched file change event
-func listen() {
-    for {
-        select {
-            case event := <- watcher.Events:
-                if event.Op == fsnotify.Write {
-                    // handle when file change
-                    handle(event)
-                }
-            case err := <- watcher.Errors:
-                log(CLR_R, err.Error())
+    // Listen watched file change event
+    go func() {
+        for {
+            select {
+                case event := <- watcher.Events:
+                    if event.Op == fsnotify.Write {
+                        // Handle when file change
+                        handleWatch(event)
+                    }
+                case err := <- watcher.Errors:
+                    log(CLR_R, err.Error())
+            }
         }
-    }
+    }()
 }
 
-// when file change, run task to handle
-func handle(event fsnotify.Event) {
-    // get change file info
+// When file change, run task to handle
+func handleWatch(event fsnotify.Event) {
+    // Get change file info
     fileName := event.Name
-    // if changed file path match define in build map, run task
+    // If changed file path match define in build map, run task
     for pattern, task := range buildMap.Watch {
         pattern = parseVariable(pattern)
         if ok, err := filepath.Match(pattern, fileName); err == nil && ok {
-            // exec task by task name
+            // Exec task by task name
             if taskName := extractRef(task); taskName != "" {
                 go runTask(taskName, false)
             }
@@ -91,7 +96,7 @@ func handle(event fsnotify.Event) {
     }
 }
 
-// replace ${} refrence to real value
+// Replace ${} refrence to real value
 func parseVariable(str string) string {
     refAry := varRegex.FindAllString(str, -1)
     if len(refAry) > 0 {
@@ -99,13 +104,16 @@ func parseVariable(str string) string {
             varName := extractRef(ref)
             if varValue, ok := buildMap.Variable[varName]; ok {
                 str = strings.Replace(str, ref, varValue, 1)
+            } else {
+                log(CLR_R, "ERR: Variable \"" + varName + "\" Not Found")
+                os.Exit(1)
             }
         }
     }
     return str
 }
 
-// extract ${} refrence
+// Extract ${} refrence
 func extractRef(str string) string {
     if len(str) > 3 && str[0:2] == "${" && string(str[len(str) - 1]) == "}" {
         str = strings.Replace(str, "${", "", -1)
@@ -115,9 +123,9 @@ func extractRef(str string) string {
     return ""
 }
 
-// run task defined in build map
+// Run task defined in build map
 func runTask(task string, forceDaemon bool) {
-    // if task has # prefix, run in non-block mode
+    // If task has # prefix, run in non-block mode
     daemon := false
     if string(task[0]) == "#" {
         daemon = true
@@ -126,7 +134,7 @@ func runTask(task string, forceDaemon bool) {
         daemon = true
     }
     if cmdAry, ok := buildMap.Task[task]; ok {
-        // exec command by array order
+        // Exec command by array order
         for idx, cmd := range cmdAry {
             err := runCMD(cmd, daemon)
             taskName := task + " [" + strconv.Itoa(idx) + "]"
@@ -137,78 +145,101 @@ func runTask(task string, forceDaemon bool) {
             }
         }
     } else {
-        log(CLR_R, "ERR: " + task + " Not Found")
+        log(CLR_R, "ERR: Task \"" + task + "\" Not Found")
         os.Exit(1)
     }
 }
 
-// run command defined in task
+// Run command defined in task
 func runCMD(command string, daemon bool) error {
-    // run task if command is task name
+    // Run task if command is task name
     if taskName := extractRef(command); taskName != "" {
         runTask(taskName, daemon)
         return nil
     }
-    // parse variable in command
+    // Parse variable in command
     command = parseVariable(command)
-    // parse command line auguments
-    // cmdAry := strings.Split(command, " ")
-    // prepare exec command
+    // Prepare exec command
     cmd := exec.Command("/bin/sh", "-c", command)
-    // start print stdout and stderr of process
+    // Start print stdout and stderr of process
     stdout, _ := cmd.StdoutPipe()
     stderr, _ := cmd.StderrPipe()
     out := bufio.NewScanner(stdout)
     err := bufio.NewScanner(stderr)
-    // print stdout
+    // Print stdout
     go func() {
         for out.Scan() {
             log(CLR_W, out.Text())
         }
     }()
-    // print stdin
+    // Print stdin
     go func() {
         for err.Scan() {
             log(CLR_R, err.Text())
         }
     }()
-    // exec command
+    // Exec command
     if daemon {
-        // run in non-block mode
+        // Run in non-block mode
         go cmd.Run()
         return nil
     }
     return cmd.Run()
 }
 
-// init some global variable
+// Init some global variable
 func init() {
     watcher, _ = fsnotify.NewWatcher()
     varRegex = regexp.MustCompile("\\${[A-Za-z0-9_-]+}")
 }
 
 func main() {
-    // parse json config file, get build map
-    file, err := ioutil.ReadFile("./build.json")
-    if err != nil {
-        log(CLR_R, err.Error())
-        os.Exit(1)
+    // Init cli app
+    app := cli.NewApp()
+    app.Name = "Build.go"
+    app.Usage = "A Simple Automation Task Build Tool"
+    app.Author = "https://github.com/imeoer"
+    app.Email = "imeoer@gmail.com"
+    app.Version = "0.1.0"
+    app.Flags = []cli.Flag {
+        cli.StringFlag{
+            Name: "config, c",
+            Value: "build.yml",
+            Usage: "Build.go YAML Format Config File",
+        },
     }
-    if err := json.Unmarshal(file, &buildMap); err != nil {
-        log(CLR_R, "Config Parse: " + err.Error())
-        os.Exit(1)
+    app.Action = func(c *cli.Context) {
+        // Get config file and task name from command line
+        var taskName, configFile string
+        if len(c.Args()) > 0 {
+            taskName = c.Args()[0]
+        } else {
+            taskName = "default"
+        }
+        configFile = c.String("config")
+        // Parse json config file, get build map
+        file, err := ioutil.ReadFile(configFile)
+        if err != nil {
+            log(CLR_R, err.Error())
+            os.Exit(1)
+        }
+        if err := yaml.Unmarshal(file, &buildMap); err != nil {
+            log(CLR_R, "Config: " + err.Error())
+            os.Exit(1)
+        }
+        // Prehandle for config file
+        // Support nest variable
+        for name, value := range buildMap.Variable {
+            buildMap.Variable[name] = parseVariable(value)
+        }
+        // Use for always running
+        done := make(chan bool)
+        // Start to watch file change
+        startWatch()
+        // Run specified task, if not specified, run default task
+        runTask(taskName, false)
+        // Keep watch if has watch config
+        <- done
     }
-    // use for always running
-    done := make(chan bool)
-    // start to watch file change
-    watch()
-    // listen watching file change
-    go listen()
-    // run specified task, if not specified, run default task
-    if len(os.Args) > 1 {
-        runTask(os.Args[1], false)
-    } else {
-        runTask("default", false)
-    }
-    <- done
+    app.Run(os.Args)
 }

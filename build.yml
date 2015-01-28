@@ -1,0 +1,48 @@
+# This yaml file is Build.go's config file
+
+# Define global variable; could use in task and watch define
+# Variable could nest in variable, write as ${variable}
+variable:
+    web: "${api}/web"
+    api: "/home/imeoer/PROJECT/ink.go/src/github.com/imeoer/bamboo-api"
+
+# Define tasks; task name and command array
+# Command could use ${variable}, ${task}
+# If ${task} write as ${#task}, mean the task is non-block
+task:
+    default:
+        - "${#build_web_develop}"
+        - "${#build_api}"
+        - "sudo atom ${api}"
+    release:
+        - "${#build_web_release}"
+        - "${#build_api}"
+    build_web_develop:
+        - "gulp --cwd ${web}"
+    build_web_release:
+        - "gulp release --cwd ${web}"
+    build_api:
+        - "${build_ink}"
+        - "${build_bamboo}"
+        - "${build_main}"
+    build_main:
+        - "cd ${api} && go build"
+        - "pkill -9 bamboo-api; cd ${api} && ./bamboo-api"
+    build_bamboo:
+        - "cd ${api}/bamboo && go build"
+        - "${build_main}"
+    build_ink:
+        - "cd ${api}/ink && go build"
+        - "${build_bamboo}"
+        - "${build_main}"
+    low:
+        - "xrandr --output eDP1 --mode 1360x768"
+    high:
+        - "xrandr --output eDP1 --mode 1920x1080"
+
+# Define watched files; once files change, will trigger task
+# Files field could use ${variable}, task field could use ${task}
+# watch:
+#     ${api}/*.go: "${build_main}"
+#     ${api}/ink/*.go: "${build_ink}"
+#     ${api}/bamboo/*.go: "${build_bamboo}"
