@@ -43,19 +43,27 @@ var watcher *fsnotify.Watcher
 var watchDir map[string]bool
 
 // Need print detail log flag
-var needDetailLog bool
+var noDetailLog bool
 
 // Print colorful log
 func log(color string, info string) {
-    if color == CLR_G && !needDetailLog {
+    if color == CLR_G && noDetailLog {
         return
     }
-    fmt.Printf("%s%s%s", color, info + "\n", "\x1b[0m")
+    var outputType string
+    if color == CLR_W {
+        outputType = "LOG"
+    } else if color == CLR_R {
+        outputType = "ERR"
+    } else if color == CLR_G {
+        outputType = "RUN"
+    }
+    fmt.Printf("%s: %s%s%s", outputType, color, info + "\n", "\x1b[0m")
 }
 
 // Watch file change in specified directory
 func startWatch() {
-    log(CLR_G, "RUN: watching file change...")
+    log(CLR_G, "Watching file change...")
     for path, _ := range buildMap.Watch {
         path = parseVariable(path)
         if matchPath, err := filepath.Glob(path); err == nil {
@@ -114,7 +122,7 @@ func parseVariable(str string) string {
             if varValue, ok := buildMap.Variable[varName]; ok {
                 str = strings.Replace(str, ref, varValue, 1)
             } else {
-                log(CLR_R, "ERR: Variable \"" + varName + "\" Not Found")
+                log(CLR_R, "Variable \"" + varName + "\" Not Found")
                 os.Exit(1)
             }
         }
@@ -147,14 +155,14 @@ func runTask(task string, forceDaemon bool) {
         for idx, cmd := range cmdAry {
             err := runCMD(cmd, daemon)
             taskName := task + " [" + strconv.Itoa(idx) + "]"
-            log(CLR_G, "RUN: " + taskName)
+            log(CLR_G, taskName)
             if err != nil {
-                log(CLR_G, "RUN TERMINATED: " + taskName)
+                log(CLR_G, taskName + "TERMINATED")
                 break
             }
         }
     } else {
-        log(CLR_R, "ERR: Task \"" + task + "\" Not Found")
+        log(CLR_R, "Task \"" + task + "\" Not Found")
         os.Exit(1)
     }
 }
@@ -218,8 +226,8 @@ func main() {
             Usage: "Build.go YAML Format Config File",
         },
         cli.BoolFlag{
-            Name: "detail, d",
-            Usage: "Show detail log when running build",
+            Name: "silent, s",
+            Usage: "Hide detail log when running build",
         },
     }
     app.Action = func(c *cli.Context) {
@@ -231,7 +239,7 @@ func main() {
             taskName = "default"
         }
         configFile = c.String("config")
-        needDetailLog = c.Bool("detail")
+        noDetailLog = c.Bool("silent")
         // Parse json config file, get build map
         file, err := ioutil.ReadFile(configFile)
         if err != nil {
@@ -239,7 +247,7 @@ func main() {
             os.Exit(1)
         }
         if err := yaml.Unmarshal(file, &buildMap); err != nil {
-            log(CLR_R, "Config: " + err.Error())
+            log(CLR_R, "Config " + err.Error())
             os.Exit(1)
         }
         // Prehandle for config file
