@@ -42,7 +42,7 @@ task:
 
 # Define watched files; once files change, will trigger task
 # Files field could use ${variable}, task field could use ${task}
-# watch:
-#     ${api}/*.go: "${build_main}"
-#     ${api}/ink/*.go: "${build_ink}"
-#     ${api}/bamboo/*.go: "${build_bamboo}"
+watch:
+    ${api}/*.go: "${build_main}"
+    ${api}/ink/*.go: "${build_ink}"
+    ${api}/bamboo/*.go: "${build_bamboo}"

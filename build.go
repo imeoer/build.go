@@ -39,30 +39,39 @@ var varRegex *regexp.Regexp
 // Global watcher for file change
 var watcher *fsnotify.Watcher
 
+// Watch dir path map, keep unique
+var watchDir map[string]bool
+
+// Need print detail log flag
+var needDetailLog bool
+
 // Print colorful log
 func log(color string, info string) {
+    if color == CLR_G && !needDetailLog {
+        return
+    }
     fmt.Printf("%s%s%s", color, info + "\n", "\x1b[0m")
 }
 
 // Watch file change in specified directory
 func startWatch() {
+    log(CLR_G, "RUN: watching file change...")
     for path, _ := range buildMap.Watch {
         path = parseVariable(path)
-        dirPath := filepath.Dir(path)
-        _, err := os.Stat(dirPath)
-        if err != nil {
+        if matchPath, err := filepath.Glob(path); err == nil {
+            for _, path := range matchPath {
+                dirPath := filepath.Dir(path)
+                if _, ok := watchDir[dirPath]; !ok {
+                    if err := watcher.Add(dirPath); err != nil {
+                        log(CLR_R, err.Error())
+                    }
+                    watchDir[dirPath] = true
+                }
+            }
+        } else {
             log(CLR_R, err.Error())
             os.Exit(1)
         }
-        filepath.Walk(dirPath, func (path string, f os.FileInfo, err error) error {
-            if f.IsDir() {
-                // Defer watcher.Close()
-                if err := watcher.Add(path); err != nil {
-                    log(CLR_R, err.Error())
-                }
-            }
-            return nil
-        })
     }
     // Listen watched file change event
     go func() {
@@ -191,6 +200,7 @@ func runCMD(command string, daemon bool) error {
 func init() {
     watcher, _ = fsnotify.NewWatcher()
     varRegex = regexp.MustCompile("\\${[A-Za-z0-9_-]+}")
+    watchDir = make(map[string]bool)
 }
 
 func main() {
@@ -207,6 +217,10 @@ func main() {
             Value: "build.yml",
             Usage: "Build.go YAML Format Config File",
         },
+        cli.BoolFlag{
+            Name: "detail, d",
+            Usage: "Show detail log when running build",
+        },
     }
     app.Action = func(c *cli.Context) {
         // Get config file and task name from command line
@@ -217,6 +231,7 @@ func main() {
             taskName = "default"
         }
         configFile = c.String("config")
+        needDetailLog = c.Bool("detail")
         // Parse json config file, get build map
         file, err := ioutil.ReadFile(configFile)
         if err != nil {
@@ -239,7 +254,9 @@ func main() {
         // Run specified task, if not specified, run default task
         runTask(taskName, false)
         // Keep watch if has watch config
-        <- done
+        if len(buildMap.Watch) != 0 {
+            <- done
+        }
     }
     app.Run(os.Args)
 }
