@@ -1,18 +1,18 @@
 package main
 
 import (
-    "os"
-    "fmt"
     "bufio"
+    "fmt"
+    "github.com/codegangsta/cli"
+    "github.com/go-fsnotify/fsnotify"
+    "gopkg.in/yaml.v2"
+    "io/ioutil"
+    "os"
+    "os/exec"
+    "path/filepath"
     "regexp"
     "strconv"
     "strings"
-    "os/exec"
-    "io/ioutil"
-    "path/filepath"
-    "gopkg.in/yaml.v2"
-    "github.com/codegangsta/cli"
-    "github.com/go-fsnotify/fsnotify"
 )
 
 // Color define for log
@@ -26,8 +26,8 @@ const (
 // Build define by parse config json
 type BuildMap struct {
     Variable map[string]string
-    Task map[string][]string
-    Watch map[string]string
+    Task     map[string][]string
+    Watch    map[string]string
 }
 
 // Storaged data form json config
@@ -42,11 +42,14 @@ var watcher *fsnotify.Watcher
 // Watch dir path map, keep unique
 var watchDir map[string]bool
 
-// Need print detail log flag
+// Hide detail log when running build
 var noDetailLog bool
 
+// Keep log when watched file change again
+var keepLog bool
+
 // Print colorful log
-func log(color string, info string) {
+func log(color string, info interface{}) {
     if color == CLR_G && noDetailLog {
         return
     }
@@ -58,18 +61,25 @@ func log(color string, info string) {
     } else if color == CLR_G {
         outputType = "RUN"
     }
-    fmt.Printf("%s: %s%s%s", outputType, color, info + "\n", "\x1b[0m")
+    fmt.Printf("%s: %s%s%s\n", outputType, color, info, "\x1b[0m")
+}
+
+// Clear log
+func clear() {
+    cmd := exec.Command("clear")
+    cmd.Stdout = os.Stdout
+    cmd.Run()
 }
 
 // Watch file change in specified directory
 func startWatch() {
-    log(CLR_G, "Watching file change...")
     for path, _ := range buildMap.Watch {
         path = parseVariable(path)
         if matchPath, err := filepath.Glob(path); err == nil {
             for _, path := range matchPath {
                 dirPath := filepath.Dir(path)
                 if _, ok := watchDir[dirPath]; !ok {
+                    log(CLR_G, "Watching file on "+dirPath)
                     if err := watcher.Add(dirPath); err != nil {
                         log(CLR_R, err.Error())
                     }
@@ -85,13 +95,13 @@ func startWatch() {
     go func() {
         for {
             select {
-                case event := <- watcher.Events:
-                    if event.Op == fsnotify.Write {
-                        // Handle when file change
-                        handleWatch(event)
-                    }
-                case err := <- watcher.Errors:
-                    log(CLR_R, err.Error())
+            case event := <-watcher.Events:
+                if event.Op == fsnotify.Write {
+                    // Handle when file change
+                    handleWatch(event)
+                }
+            case err := <-watcher.Errors:
+                log(CLR_R, err.Error())
             }
         }
     }()
@@ -107,6 +117,9 @@ func handleWatch(event fsnotify.Event) {
         if ok, err := filepath.Match(pattern, fileName); err == nil && ok {
             // Exec task by task name
             if taskName := extractRef(task); taskName != "" {
+                if !keepLog {
+                    clear()
+                }
                 go runTask(taskName, false)
             }
         }
@@ -122,7 +135,7 @@ func parseVariable(str string) string {
             if varValue, ok := buildMap.Variable[varName]; ok {
                 str = strings.Replace(str, ref, varValue, 1)
             } else {
-                log(CLR_R, "Variable \"" + varName + "\" Not Found")
+                log(CLR_R, "Variable \""+varName+"\" Not Found")
                 os.Exit(1)
             }
         }
@@ -132,7 +145,7 @@ func parseVariable(str string) string {
 
 // Extract ${} refrence
 func extractRef(str string) string {
-    if len(str) > 3 && str[0:2] == "${" && string(str[len(str) - 1]) == "}" {
+    if len(str) > 3 && str[0:2] == "${" && string(str[len(str)-1]) == "}" {
         str = strings.Replace(str, "${", "", -1)
         str = strings.Replace(str, "}", "", -1)
         return str
@@ -157,12 +170,12 @@ func runTask(task string, forceDaemon bool) {
             taskName := task + " [" + strconv.Itoa(idx) + "]"
             log(CLR_G, taskName)
             if err != nil {
-                log(CLR_G, taskName + "TERMINATED")
+                log(CLR_G, taskName+" TERMINATED")
                 break
             }
         }
     } else {
-        log(CLR_R, "Task \"" + task + "\" Not Found")
+        log(CLR_R, "Task \""+task+"\" Not Found")
         os.Exit(1)
     }
 }
@@ -177,7 +190,15 @@ func runCMD(command string, daemon bool) error {
     // Parse variable in command
     command = parseVariable(command)
     // Prepare exec command
-    cmd := exec.Command("/bin/sh", "-c", command)
+    var shell, flag string
+    if runtime.GOOS == "windows" {
+        shell = "cmd"
+        flag = "/C"
+    } else {
+        shell = "/bin/sh"
+        flag = "-c"
+    }
+    cmd := exec.Command(shell, flag, command)
     // Start print stdout and stderr of process
     stdout, _ := cmd.StdoutPipe()
     stderr, _ := cmd.StderrPipe()
@@ -219,15 +240,19 @@ func main() {
     app.Author = "https://github.com/imeoer"
     app.Email = "imeoer@gmail.com"
     app.Version = "0.1.0"
-    app.Flags = []cli.Flag {
+    app.Flags = []cli.Flag{
         cli.StringFlag{
-            Name: "config, c",
+            Name:  "config, c",
             Value: "build.yml",
             Usage: "Build.go YAML Format Config File",
         },
         cli.BoolFlag{
-            Name: "silent, s",
+            Name:  "silent, s",
             Usage: "Hide detail log when running build",
+        },
+        cli.BoolFlag{
+            Name:  "keep, k",
+            Usage: "Keep log when watched file change again",
         },
     }
     app.Action = func(c *cli.Context) {
@@ -240,6 +265,7 @@ func main() {
         }
         configFile = c.String("config")
         noDetailLog = c.Bool("silent")
+        keepLog = c.Bool("keep")
         // Parse json config file, get build map
         file, err := ioutil.ReadFile(configFile)
         if err != nil {
@@ -247,7 +273,7 @@ func main() {
             os.Exit(1)
         }
         if err := yaml.Unmarshal(file, &buildMap); err != nil {
-            log(CLR_R, "Config " + err.Error())
+            log(CLR_R, "Config "+err.Error())
             os.Exit(1)
         }
         // Prehandle for config file
@@ -263,7 +289,7 @@ func main() {
         runTask(taskName, false)
         // Keep watch if has watch config
         if len(buildMap.Watch) != 0 {
-            <- done
+            <-done
         }
     }
     app.Run(os.Args)
